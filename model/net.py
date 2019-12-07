@@ -45,7 +45,7 @@ class Net(nn.Module):
         # 2 fully connected layers to transform the output of the convolution layers to the final output
         self.fc1 = nn.Linear(4*4*self.num_channels*4, self.num_channels*4)
         self.fcbn1 = nn.BatchNorm1d(self.num_channels*4)
-        self.fc2 = nn.Linear(self.num_channels*4, 10)       
+        self.fc2 = nn.Linear(self.num_channels*4, 100)       
         self.dropout_rate = params.dropout_rate
 
     def forward(self, s):
@@ -107,9 +107,21 @@ def loss_fn_kd(outputs, labels, teacher_outputs, params):
     """
     alpha = params.alpha
     T = params.temperature
+#     print(labels)
+    y_onehot = torch.FloatTensor(len(labels), 100).cuda()
+
+    # In your for loop
+    y_onehot.zero_()
+    y_onehot.scatter_(1, labels.reshape(-1,1), 1)
+#     print(y_onehot)
+#     KD_loss = nn.KLDivLoss()(F.log_softmax(outputs/T, dim=1),
+#                              F.softmax(teacher_outputs/T, dim=1)) * (alpha * T * T) + \
+#               F.cross_entropy(outputs, labels) * (1. - alpha)
     KD_loss = nn.KLDivLoss()(F.log_softmax(outputs/T, dim=1),
-                             F.softmax(teacher_outputs/T, dim=1)) * (alpha * T * T) + \
+                             (y_onehot/T)) * (alpha * T * T) + \
               F.cross_entropy(outputs, labels) * (1. - alpha)
+#     KD_loss = nn.KLDivLoss()(F.log_softmax(outputs/T, dim=1),
+#                              F.softmax(teacher_outputs/T, dim=1)) * (alpha * T * T) 
 
     return KD_loss
 

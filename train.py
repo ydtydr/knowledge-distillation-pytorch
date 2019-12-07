@@ -19,6 +19,7 @@ import utils
 import model.net as net
 import model.data_loader as data_loader
 import model.resnet as resnet
+import model.vgg as vgg
 import model.wrn as wrn
 import model.densenet as densenet
 import model.resnext as resnext
@@ -58,11 +59,11 @@ def train(model, optimizer, loss_fn, dataloader, metrics, params):
         for i, (train_batch, labels_batch) in enumerate(dataloader):
             # move to GPU if available
             if params.cuda:
-                train_batch, labels_batch = train_batch.cuda(async=True), \
-                                            labels_batch.cuda(async=True)
+                train_batch, labels_batch = train_batch.cuda(), labels_batch.cuda()
             # convert to torch Variables
             train_batch, labels_batch = Variable(train_batch), Variable(labels_batch)
 
+#             print(labels_batch)
             # compute model output and loss
             output_batch = model(train_batch)
             loss = loss_fn(output_batch, labels_batch)
@@ -83,15 +84,16 @@ def train(model, optimizer, loss_fn, dataloader, metrics, params):
                 # compute all metrics on this batch
                 summary_batch = {metric:metrics[metric](output_batch, labels_batch)
                                  for metric in metrics}
-                summary_batch['loss'] = loss.data[0]
+                summary_batch['loss'] = loss.data.cpu().numpy()
                 summ.append(summary_batch)
 
             # update the average loss
-            loss_avg.update(loss.data[0])
+            loss_avg.update(loss.data)
 
             t.set_postfix(loss='{:05.3f}'.format(loss_avg()))
             t.update()
 
+#     print(summ)
     # compute mean of all metrics in summary
     metrics_mean = {metric:np.mean([x[metric] for x in summ]) for metric in summ[0]}
     metrics_string = " ; ".join("{}: {:05.3f}".format(k, v) for k, v in metrics_mean.items())
@@ -167,8 +169,7 @@ def fetch_teacher_outputs(teacher_model, dataloader, params):
     teacher_outputs = []
     for i, (data_batch, labels_batch) in enumerate(dataloader):
         if params.cuda:
-            data_batch, labels_batch = data_batch.cuda(async=True), \
-                                        labels_batch.cuda(async=True)
+            data_batch, labels_batch = data_batch.cuda(), labels_batch.cuda()
         data_batch, labels_batch = Variable(data_batch), Variable(labels_batch)
 
         output_teacher_batch = teacher_model(data_batch).data.cpu().numpy()
@@ -178,7 +179,7 @@ def fetch_teacher_outputs(teacher_model, dataloader, params):
 
 
 # Defining train_kd & train_and_evaluate_kd functions
-def train_kd(model, teacher_outputs, optimizer, loss_fn_kd, dataloader, metrics, params):
+def train_kd(model, teacher_outputs, optimizer, loss_fn_kd, subclasses, dataloader, metrics, params):
     """Train the model on `num_steps` batches
 
     Args:
@@ -203,21 +204,24 @@ def train_kd(model, teacher_outputs, optimizer, loss_fn_kd, dataloader, metrics,
         for i, (train_batch, labels_batch) in enumerate(dataloader):
             # move to GPU if available
             if params.cuda:
-                train_batch, labels_batch = train_batch.cuda(async=True), \
-                                            labels_batch.cuda(async=True)
+                train_batch, labels_batch = train_batch.cuda(), labels_batch.cuda()
             # convert to torch Variables
             train_batch, labels_batch = Variable(train_batch), Variable(labels_batch)
 
+#             print(labels_batch)
             # compute model output, fetch teacher output, and compute KD loss
             output_batch = model(train_batch)
 
             # get one batch output from teacher_outputs list
             output_teacher_batch = torch.from_numpy(teacher_outputs[i])
+#             output_teacher_batch = torch.from_numpy(teacher_outputs[i][:,subclasses])
+#             print(output_teacher_batch,output_teacher_batch.shape)
             if params.cuda:
-                output_teacher_batch = output_teacher_batch.cuda(async=True)
+                output_teacher_batch = output_teacher_batch.cuda()
             output_teacher_batch = Variable(output_teacher_batch, requires_grad=False)
 
             loss = loss_fn_kd(output_batch, labels_batch, output_teacher_batch, params)
+#             print(loss)
 
             # clear previous gradients, compute gradients of all variables wrt loss
             optimizer.zero_grad()
@@ -235,15 +239,16 @@ def train_kd(model, teacher_outputs, optimizer, loss_fn_kd, dataloader, metrics,
                 # compute all metrics on this batch
                 summary_batch = {metric:metrics[metric](output_batch, labels_batch)
                                  for metric in metrics}
-                summary_batch['loss'] = loss.data[0]
+                summary_batch['loss'] = loss.data.cpu().numpy()
                 summ.append(summary_batch)
 
             # update the average loss
-            loss_avg.update(loss.data[0])
+            loss_avg.update(loss.data)
 
             t.set_postfix(loss='{:05.3f}'.format(loss_avg()))
             t.update()
 
+    print(summ)
     # compute mean of all metrics in summary
     metrics_mean = {metric:np.mean([x[metric] for x in summ]) for metric in summ[0]}
     metrics_string = " ; ".join("{}: {:05.3f}".format(k, v) for k, v in metrics_mean.items())
@@ -251,7 +256,7 @@ def train_kd(model, teacher_outputs, optimizer, loss_fn_kd, dataloader, metrics,
 
 
 def train_and_evaluate_kd(model, teacher_model, train_dataloader, val_dataloader, optimizer,
-                       loss_fn_kd, metrics, params, model_dir, restore_file=None):
+                       loss_fn_kd, subclasses, metrics, params, model_dir, restore_file=None):
     """Train the model and evaluate every epoch.
 
     Args:
@@ -293,7 +298,7 @@ def train_and_evaluate_kd(model, teacher_model, train_dataloader, val_dataloader
         logging.info("Epoch {}/{}".format(epoch + 1, params.num_epochs))
 
         # compute number of batches in one epoch (one full pass over the training set)
-        train_kd(model, teacher_outputs, optimizer, loss_fn_kd, train_dataloader,
+        train_kd(model, teacher_outputs, optimizer, loss_fn_kd, subclasses, train_dataloader,
                  metrics, params)
 
         # Evaluate for one epoch on validation set
@@ -360,12 +365,14 @@ if __name__ == '__main__':
 
     # Create the input data pipeline
     logging.info("Loading the datasets...")
+    
+    subclasses = [0,1,2,3,4,5,6,7,8,9]
 
     # fetch dataloaders, considering full-set vs. sub-set scenarios
-    if params.subset_percent < 1.0:
-        train_dl = data_loader.fetch_subset_dataloader('train', params)
-    else:
-        train_dl = data_loader.fetch_dataloader('train', params)
+#     if params.subset_percent < 1.0:
+    train_dl = data_loader.fetch_dataloader('train', params)
+#     else:
+#         train_dl = data_loader.fetch_dataloader('train', params)
     
     dev_dl = data_loader.fetch_dataloader('dev', params)
 
@@ -409,6 +416,11 @@ if __name__ == '__main__':
                                            dropRate=0.3)
             teacher_checkpoint = 'experiments/base_wrn/best.pth.tar'
             teacher_model = nn.DataParallel(teacher_model).cuda()
+        
+        elif params.teacher == "vgg":
+            teacher_model = vgg.vgg16_bn()
+            teacher_checkpoint = 'experiments/base_vgg/vgg16-187-best-Copy1.pth'
+            teacher_model = teacher_model.cuda()
 
         elif params.teacher == "densenet":
             teacher_model = densenet.DenseNet(depth=100, growthRate=12)
@@ -431,7 +443,7 @@ if __name__ == '__main__':
         logging.info("Experiment - model version: {}".format(params.model_version))
         logging.info("Starting training for {} epoch(s)".format(params.num_epochs))
         logging.info("First, loading the teacher model and computing its outputs...")
-        train_and_evaluate_kd(model, teacher_model, train_dl, dev_dl, optimizer, loss_fn_kd,
+        train_and_evaluate_kd(model, teacher_model, train_dl, dev_dl, optimizer, loss_fn_kd, subclasses,
                               metrics, params, args.model_dir, args.restore_file)
 
     # non-KD mode: regular training of the baseline CNN or ResNet-18
