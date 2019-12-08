@@ -65,7 +65,8 @@ def train(model, optimizer, loss_fn, dataloader, metrics, params):
 
             # compute model output and loss
             output_batch = model(train_batch)
-            loss = loss_fn(output_batch, labels_batch)
+#             loss = loss_fn(output_batch, labels_batch)
+            loss = loss_fn(output_batch, labels_batch, params)
 
             # clear previous gradients, compute gradients of all variables wrt loss
             optimizer.zero_grad()
@@ -83,11 +84,11 @@ def train(model, optimizer, loss_fn, dataloader, metrics, params):
                 # compute all metrics on this batch
                 summary_batch = {metric:metrics[metric](output_batch, labels_batch)
                                  for metric in metrics}
-                summary_batch['loss'] = loss.data[0]
+                summary_batch['loss'] = loss.item()
                 summ.append(summary_batch)
 
             # update the average loss
-            loss_avg.update(loss.data[0])
+            loss_avg.update(loss.item())
 
             t.set_postfix(loss='{:05.3f}'.format(loss_avg()))
             t.update()
@@ -235,11 +236,11 @@ def train_kd(model, teacher_outputs, optimizer, loss_fn_kd, dataloader, metrics,
                 # compute all metrics on this batch
                 summary_batch = {metric:metrics[metric](output_batch, labels_batch)
                                  for metric in metrics}
-                summary_batch['loss'] = loss.data[0]
+                summary_batch['loss'] = loss.item()
                 summ.append(summary_batch)
 
             # update the average loss
-            loss_avg.update(loss.data[0])
+            loss_avg.update(loss.item())
 
             t.set_postfix(loss='{:05.3f}'.format(loss_avg()))
             t.update()

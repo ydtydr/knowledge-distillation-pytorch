@@ -123,18 +123,36 @@ def ResNet152():
 
 # test()
 
-def loss_fn(outputs, labels):
+# def loss_fn(outputs, labels):
+#     """
+#     Compute the cross entropy loss given outputs and labels.
+
+#     Returns:
+#         loss (Variable): cross entropy loss for all images in the batch
+
+#     Note: you may use a standard loss function from http://pytorch.org/docs/master/nn.html#loss-functions. This example
+#           demonstrates how you can easily define a custom loss function.
+#     """
+#     return nn.CrossEntropyLoss()(outputs, labels)
+
+def loss_fn(outputs, labels, params):
     """
-    Compute the cross entropy loss given outputs and labels.
-
-    Returns:
-        loss (Variable): cross entropy loss for all images in the batch
-
-    Note: you may use a standard loss function from http://pytorch.org/docs/master/nn.html#loss-functions. This example
-          demonstrates how you can easily define a custom loss function.
+    Compute the knowledge-distillation (KD) loss given outputs, labels.
+    "Hyperparameters": temperature and alpha
+    NOTE: the KL Divergence for PyTorch comparing the softmaxs of teacher
+    and student expects the input tensor to be log probabilities! See Issue #2
     """
-    return nn.CrossEntropyLoss()(outputs, labels)
+    alpha = params.alpha
+    T = params.temperature
+    y_onehot = torch.FloatTensor(len(labels), 10).cuda()
+    # In your for loop
+    y_onehot.zero_()
+    y_onehot.scatter_(1, labels.reshape(-1,1), 1)
+    KD_loss = nn.KLDivLoss()(F.log_softmax(outputs/T, dim=1),
+                             (y_onehot/T)) * (alpha * T * T) + \
+              F.cross_entropy(outputs, labels) * (1. - alpha)
 
+    return KD_loss
 
 def accuracy(outputs, labels):
     """
